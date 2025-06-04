@@ -1,0 +1,91 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Production builds
+build/
+dist/
+*/build/
+*/dist/
+
+# Cache
+.cache
+.parcel-cache
+.next
+.nuxt
+.vuepress/dist
+.serverless/
+.fusebox/
+.dynamodb/
+.tern-port
+.vscode-test
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.c9/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+
+# Temporary files
+tmp/
+temp/
+uploads/
+!uploads/.gitkeep
+
+# Database
+*.sqlite
+*.sqlite3
+mongodb_data/
+
+# Docker
+.docker/
+
+# Miscellaneous
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+.npm
+.eslintrc.json

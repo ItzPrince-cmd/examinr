@@ -1,0 +1,27 @@
+[Unit]
+Description=Examinr Backend Service
+After=network.target mongodb.service
+
+[Service]
+Type=simple
+User=examinr
+WorkingDirectory=/opt/examinr/backend
+Environment="NODE_ENV=production"
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/examinr/backend/logs /opt/examinr/backend/uploads
+
+# Resource Limits
+LimitNOFILE=65535
+MemoryLimit=1G
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target

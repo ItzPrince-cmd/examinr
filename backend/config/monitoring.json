@@ -1,0 +1,42 @@
+{
+  "alerts": {
+    "email": {
+      "enabled": false,
+      "recipients": [
+        "admin@examinr.com"
+      ],
+      "smtp": {
+        "secure": false,
+        "auth": {}
+      }
+    },
+    "slack": {
+      "enabled": false,
+      "channel": "#security-alerts"
+    },
+    "sms": {
+      "enabled": false,
+      "recipients": []
+    }
+  },
+  "thresholds": {
+    "failedLogins": 5,
+    "rateLimitViolations": 10,
+    "errorRate": 0.05,
+    "responseTime": 1000
+  },
+  "monitoring": {
+    "sentry": {
+      "enabled": false,
+      "environment": "development",
+      "tracesSampleRate": 0.1
+    },
+    "newRelic": {
+      "enabled": false,
+      "appName": "Examinr Backend"
+    },
+    "datadog": {
+      "enabled": false
+    }
+  }
+}

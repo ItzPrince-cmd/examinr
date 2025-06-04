@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Examinr Security Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .metric {
+            font-size: 2em;
+            font-weight: bold;
+            color: #2563eb;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .status.normal { background: #10b981; color: white; }
+        .status.elevated { background: #f59e0b; color: white; }
+        .status.warning { background: #ef4444; color: white; }
+        .status.critical { background: #991b1b; color: white; }
+        .alert {
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+        .alert.high { border-color: #ef4444; background: #fee2e2; }
+        .alert.medium { border-color: #f59e0b; background: #fef3c7; }
+        .alert.low { border-color: #3b82f6; background: #dbeafe; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ Examinr Security Dashboard</h1>
+            <p>Real-time security monitoring and alerts</p>
+            <p>Status: <span class="status normal" id="system-status">NORMAL</span></p>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h3>Request Metrics</h3>
+                <div class="metric" id="total-requests">0</div>
+                <p>Total Requests</p>
+                <p>Error Rate: <span id="error-rate">0%</span></p>
+            </div>
+            
+            <div class="card">
+                <h3>Authentication</h3>
+                <div class="metric" id="auth-attempts">0</div>
+                <p>Login Attempts</p>
+                <p>Success Rate: <span id="auth-success">100%</span></p>
+            </div>
+            
+            <div class="card">
+                <h3>Security Events</h3>
+                <div class="metric" id="security-violations">0</div>
+                <p>Violations Detected</p>
+                <p>Rate Limits: <span id="rate-limits">0</span></p>
+            </div>
+        </div>
+        
+        <div class="card" style="margin-top: 20px;">
+            <h3>Recent Alerts</h3>
+            <div id="alerts-container">
+                <p style="color: #6b7280;">No recent alerts</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // This would connect to your real-time monitoring API
+        async function updateDashboard() {
+            try {
+                const response = await fetch('/api/security/dashboard', {
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('token')
+                    }
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateMetrics(data.data);
+                }
+            } catch (error) {
+                console.error('Failed to update dashboard:', error);
+            }
+        }
+        
+        function updateMetrics(data) {
+            // Update status
+            document.getElementById('system-status').textContent = data.overview.status;
+            document.getElementById('system-status').className = 'status ' + data.overview.status.toLowerCase();
+            
+            // Update metrics
+            document.getElementById('total-requests').textContent = data.metrics.requests.total;
+            document.getElementById('error-rate').textContent = data.metrics.requests.errorRate;
+            document.getElementById('auth-attempts').textContent = data.metrics.authentication.total;
+            document.getElementById('auth-success').textContent = data.metrics.authentication.successRate;
+            document.getElementById('security-violations').textContent = data.metrics.security.violations;
+            document.getElementById('rate-limits').textContent = data.metrics.security.rateLimitViolations;
+            
+            // Update alerts
+            const alertsContainer = document.getElementById('alerts-container');
+            if (data.recentAlerts.length > 0) {
+                alertsContainer.innerHTML = data.recentAlerts.slice(0, 5).map(alert => 
+                    '<div class="alert ' + alert.severity.toLowerCase() + '">' +
+                    '<strong>' + alert.type + '</strong> - ' + 
+                    new Date(alert.timestamp).toLocaleString() +
+                    '</div>'
+                ).join('');
+            }
+        }
+        
+        // Update every 30 seconds
+        setInterval(updateDashboard, 30000);
+        updateDashboard();
+    </script>
+</body>
+</html>
