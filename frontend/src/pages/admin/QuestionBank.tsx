@@ -1,7 +1,10 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, useAnimation } from 'framer-motion';
 import { AnimatePresenceWrapper } from '../../components/teacher/AnimatePresenceWrapper';
 import { useDropzone } from 'react-dropzone';
+import { useToast } from '../../components/ui/use-toast';
+import { io, Socket } from 'socket.io-client';
+import api from '../../services/api';
 
 import {
   Upload,
@@ -42,7 +45,8 @@ import {
   ArrowUpDown,
   Check,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  Download
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -62,6 +66,8 @@ import {
 } from '../../components/ui/select';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Slider } from '../../components/ui/slider';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
+import { Textarea } from '../../components/ui/textarea';
 import { cn } from '../../lib/utils';
 
 interface Question {
@@ -93,13 +99,18 @@ interface Question {
 interface UploadFile {
   id: string;
   name: string;
-  size: number; status: 'processing' | 'validating' | 'success' | 'error';
+  size: number;
+  status: 'pending' | 'processing' | 'validating' | 'success' | 'error' | 'completed' | 'failed';
   progress: number;
   questions: Question[];
   errors: {
     row: number;
-    message: string
-  }[]
+    message: string;
+  }[];
+  successCount?: number;
+  errorCount?: number;
+  duplicateCount?: number;
+  totalRows?: number;
 }
 
 interface TopicNode {
@@ -435,9 +446,86 @@ const QuestionBank: React.FC = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'tree'>('grid');
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [importPreview, setImportPreview] = useState<any>(null);
+  const [showQuestionDialog, setShowQuestionDialog] = useState(false);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+  
+  // Clear any stuck uploads on component mount
+  useEffect(() => {
+    setUploadedFiles([]);
+  }, []);
 
-  // Mock question data
-  const [questions] = useState<Question[]>([
+  // Fetch real questions from database
+  useEffect(() => {
+    fetchQuestions();
+  }, [filters]); // Refetch when filters change
+
+  const fetchQuestions = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get('/questions/search', {
+        params: {
+          page: 1,
+          limit: 100,
+          ...filters
+        }
+      });
+      
+      console.log('API Response:', response.data); // Debug log
+      
+      if (response.data.data && response.data.data.length > 0) {
+        const formattedQuestions = response.data.data.map((q: any) => ({
+          id: q._id,
+          type: q.type || 'mcq',
+          title: q.title || q.text.substring(0, 50) + '...',
+          content: q.text,
+          subject: q.subject,
+          topic: q.topic,
+          subtopic: q.subtopic || '',
+          difficulty: q.difficulty,
+          points: q.points,
+          timeEstimate: 5,
+          tags: q.tags || [],
+          options: q.options || [],
+          explanation: q.solution?.detailed?.text || '',
+          hints: [],
+          qualityScore: q.qualityScore || 0,
+          usageCount: q.statistics?.timesUsed || 0,
+          successRate: q.analytics?.successRate || 0,
+          createdAt: q.createdAt,
+          lastUsed: q.updatedAt,
+          status: q.status || 'draft'
+        }));
+        setQuestions(formattedQuestions);
+        
+        // Show info about imported questions
+        const draftCount = formattedQuestions.filter((q: any) => q.status === 'draft').length;
+        if (draftCount > 0) {
+          toast({
+            title: 'Info',
+            description: `Found ${draftCount} draft questions. Draft questions are only visible to admin users.`,
+            variant: 'default'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching questions:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch questions',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Mock question data (removing this)
+  /*const mockQuestions: Question[] = [
     {
       id: '1',
       type: 'mcq',
@@ -466,7 +554,7 @@ const QuestionBank: React.FC = () => {
       version: 3,
       status: 'published'
     }
-  ]);
+  ]);*/
   
   // Mock topic hierarchy
   const [topicHierarchy] = useState([
@@ -531,61 +619,229 @@ const QuestionBank: React.FC = () => {
     }
   ]);
   
-  // Drag and drop configuration
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    acceptedFiles.forEach((file) => {
-  const newFile: UploadFile = {
-    id: Math.random().toString(36).substr(2,
-      9),
-    name: file.name,
-    size: file.size, status: 'processing',
-    progress: 0,
-    questions: [],
-    errors: []
-  }
-
-      setUploadedFiles(prev => [...prev, newFile]);
-      
-      // Simulate file processing
-      simulateFileProcessing(newFile);
+  // Initialize WebSocket connection
+  useEffect(() => {
+    // Temporarily disabled - socket.io not configured on backend
+    return;
+    
+    const newSocket = io(process.env.REACT_APP_API_URL || 'http://localhost:5000', {
+      withCredentials: true
     });
-}, []);
-const { getRootProps, getInputProps, isDragActive } = useDropzone({
-  onDrop, accept: {
-    'application/vnd.ms-excel': ['.xls'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'text/csv': ['.csv']
-  }
-});
+    
+    // Authenticate socket with user ID
+    const userId = localStorage.getItem('userId');
+    if (userId) {
+      newSocket.emit('authenticate', userId);
+    }
+    
+    // Listen for import progress updates
+    newSocket.on('import:progress', (data) => {
+      setUploadedFiles(prev => prev.map(file => 
+        file.id === data.jobId
+          ? {
+              ...file,
+              progress: data.progress,
+              status: data.status,
+              totalRows: data.totalRows
+            }
+          : file
+      ));
+    });
+    
+    // Listen for import completion
+    newSocket.on('import:completed', (data) => {
+      setUploadedFiles(prev => prev.map(file => 
+        file.id === data.jobId
+          ? {
+              ...file,
+              status: data.status,
+              successCount: data.results.success,
+              errorCount: data.results.errors,
+              duplicateCount: data.results.duplicates
+            }
+          : file
+      ));
+      
+      toast({
+        title: 'Import Completed',
+        description: `Successfully imported ${data.results.success} questions`,
+        variant: 'default'
+      });
+    });
+    
+    setSocket(newSocket);
+    
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [toast]);
 
-// Simulate file processing with animations
-const simulateFileProcessing = (file: UploadFile) => {
-  let progress = 0;
-const interval = setInterval(() => {
-  progress += 10;
-  setUploadedFiles(prev => prev.map(f => f.id === file.id ? {
-    ...f,
-    progress,
-    status: progress < 40 ? 'processing' : progress < 80 ? 'validating' : 'success'
-  } : f));
-  if (progress >= 100) {
-    clearInterval(interval
+  // Drag and drop configuration
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    for (const file of acceptedFiles) {
+      // First validate the file
+      setIsValidating(true);
+      
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // Validate file
+        const validationResponse = await api.post('/import/validate', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        
+        if (validationResponse.data.validation.isValid) {
+          // Get preview
+          const previewResponse = await api.post('/import/preview', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data'
+            }
+          });
+          
+          setImportPreview({
+            file,
+            preview: previewResponse.data.preview,
+            totalRows: previewResponse.data.totalRows,
+            validRows: previewResponse.data.validRows
+          });
+          
+          // Automatically start import if no errors
+          if (!previewResponse.data.hasErrors) {
+            await processImport(file);
+          }
+        } else {
+          toast({
+            title: 'Validation Failed',
+            description: `File has ${validationResponse.data.validation.errors.length} errors`,
+            variant: 'destructive'
+          });
+        }
+      } catch (error: any) {
+        toast({
+          title: 'Upload Failed',
+          description: error.response?.data?.message || 'Failed to upload file',
+          variant: 'destructive'
+        });
+      } finally {
+        setIsValidating(false);
+      }
+    }
+  }, [toast]);
+  
+  // Process import
+  const processImport = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('duplicateAction', 'skip');
+    formData.append('autoPublish', 'true'); // Changed to publish questions immediately
+    
+    try {
+      const response = await api.post('/import/process', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      const newFile: UploadFile = {
+        id: response.data.jobId,
+        name: file.name,
+        size: file.size,
+        status: 'completed',
+        progress: 100,
+        questions: [],
+        errors: [],
+        successCount: response.data.results.successfulImports,
+        errorCount: response.data.results.errors,
+        duplicateCount: response.data.results.duplicates,
+        totalRows: response.data.results.totalProcessed
+      };
+      
+      setUploadedFiles(prev => [...prev, newFile]);
+      setImportPreview(null);
+      
+      // Check if there were errors
+      if (response.data.results.errors > 0) {
+        // Get job details to see errors
+        try {
+          const jobDetails = await api.get(`/import/status/${response.data.jobId}`);
+          console.log('Import errors:', jobDetails.data.job.errors);
+          
+          toast({
+            title: 'Import Completed with Errors',
+            description: `${response.data.results.successfulImports} imported, ${response.data.results.errors} errors, ${response.data.results.duplicates} duplicates. Check console for error details.`,
+            variant: 'destructive'
+          });
+        } catch (e) {
+          toast({
+            title: 'Import Completed',
+            description: `${response.data.results.successfulImports} imported, ${response.data.results.errors} errors, ${response.data.results.duplicates} duplicates.`,
+            variant: response.data.results.errors > 0 ? 'destructive' : 'default'
+          });
+        }
+      } else {
+        toast({
+          title: 'Import Successful',
+          description: `Imported ${response.data.results.successfulImports} questions successfully. ${response.data.results.duplicates} duplicates skipped.`
+        });
+      }
+      
+      // Refresh questions list after a short delay
+      setTimeout(() => {
+        fetchQuestions();
+      }, 1000);
+      
+      // Clear upload status after 5 seconds
+      setTimeout(() => {
+        setUploadedFiles(prev => prev.filter(f => f.id !== response.data.jobId));
+      }, 5000);
+    } catch (error: any) {
+      toast({
+        title: 'Import Failed',
+        description: error.response?.data?.message || 'Failed to process import',
+        variant: 'destructive'
+      });
+    }
+  };
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop, 
+    accept: {
+      'application/vnd.ms-excel': ['.xls'], 
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 
+      'text/csv': ['.csv']
+    }
+  });
 
-    );
-    // Add mock questions
-    setUploadedFiles(prev => prev.map(f => 
-      f.id === file.id 
-        ? { 
-            ...f, 
-            questions: Array.from({ length: 50 }, (_, i) => ({ 
-              ...questions[0], 
-              id: `${file.id}-${i}`, 
-              title: `Question ${i + 1} from ${file.name}` 
-            })) 
-          } 
-        : f
-    ));
-  }
-}, 200);
-};
+  // Download template
+  const downloadTemplate = async (type: 'csv' | 'excel' | 'guide') => {
+    try {
+      const response = await api.get(`/import/template/${type}`, {
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `question_import_template.${type === 'excel' ? 'xlsx' : type === 'guide' ? 'md' : 'csv'}`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast({
+        title: 'Template Downloaded',
+        description: `${type.charAt(0).toUpperCase() + type.slice(1)} template downloaded successfully`
+      });
+    } catch (error) {
+      toast({
+        title: 'Download Failed',
+        description: 'Failed to download template',
+        variant: 'destructive'
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -594,7 +850,7 @@ const interval = setInterval(() => {
         <div><h2 className="text-3xl font-bold">Question Bank Mastery</h2><p className="text-muted-foreground"> Manage and organize your entire question repository </p>
     </div><div className="flex items-center gap-3"><Button variant={bulkEditMode ? "default" : "outline"} onClick={() => setBulkEditMode(!bulkEditMode)} ><Package className="h-4 w-4 mr-2" /> Bulk Edit {selectedQuestions.size > 0 && `(${selectedQuestions.size})`}
     </Button>
-      <Button><Plus className="h-4 w-4 mr-2" /> Create Question </Button>
+      <Button onClick={() => setShowQuestionDialog(true)}><Plus className="h-4 w-4 mr-2" /> Create Question </Button>
     </div>
   </div>
   {
@@ -611,7 +867,49 @@ const interval = setInterval(() => {
           rotate: isDragActive ? 180 : 0
         }} transition={{ duration: 0.3 }} ><FileSpreadsheet className="h-12 w-12 text-muted-foreground mb-4" />
         </motion.div><p className="text-lg font-medium mb-2">{isDragActive ? 'Drop your files here' : 'Drag & drop Excel or CSV files'}
-        </p><p className="text-sm text-muted-foreground"> or click to browse from your computer </p><div className="flex items-center gap-2 mt-4"><Badge variant="secondary">Excel</Badge><Badge variant="secondary">CSV</Badge><Badge variant="secondary">Max 10MB</Badge>
+        </p>
+        <p className="text-sm text-muted-foreground">or click to browse from your computer</p>
+        <div className="flex items-center gap-2 mt-4">
+          <Badge variant="secondary">Excel</Badge>
+          <Badge variant="secondary">CSV</Badge>
+          <Badge variant="secondary">Max 50MB</Badge>
+        </div>
+        
+        {/* Template Download Buttons */}
+        <div className="flex items-center gap-3 mt-6">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              downloadTemplate('csv');
+            }}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            CSV Template
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              downloadTemplate('excel');
+            }}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Excel Template
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              downloadTemplate('guide');
+            }}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Import Guide
+          </Button>
         </div>
       </div>
       {
@@ -623,16 +921,45 @@ const interval = setInterval(() => {
         </p><p className="text-xs text-muted-foreground">
             {(file.size / 1024).toFixed(2)} KB </p>
         </div>
-      </div><Badge variant={file.status === 'success' ? 'default' : file.status === 'error' ? 'destructive' : 'secondary'} >
-          {file.status}
-        </Badge>
-      </div><div className="space-y-2"><div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">{file.status === 'processing' && 'Processing file...'} {file.status === 'validating' && 'Validating questions...'} {file.status === 'success' && `${file.questions.length} questions imported`}
+      </div>
+      <Badge 
+        variant={
+          file.status === 'completed' ? 'default' : 
+          file.status === 'failed' ? 'destructive' : 
+          'secondary'
+        }
+      >
+        {file.status}
+      </Badge>
+    </div>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">
+          {file.status === 'processing' && 'Processing file...'}
+          {file.status === 'validating' && 'Validating questions...'}
+          {file.status === 'completed' && (
+            <span>
+              {file.successCount || 0} imported, 
+              {file.errorCount || 0} errors, 
+              {file.duplicateCount || 0} duplicates
+            </span>
+          )}
+          {file.status === 'failed' && 'Import failed'}
       </span>
         <span>
           {file.progress}%</span>
       </div><Progress value={file.progress} className="h-2" />
         </div>
-        {/* Success Animation */} {file.status === 'success' && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4" ><div className="flex items-center gap-2 text-green-500"><CheckCircle className="h-4 w-4" /><span className="text-sm">Successfully imported!</span>
+        {/* Success Animation */}
+        {file.status === 'completed' && file.successCount && file.successCount > 0 && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            className="mt-4"
+          >
+            <div className="flex items-center gap-2 text-green-500">
+              <CheckCircle className="h-4 w-4" />
+              <span className="text-sm">Successfully imported!</span>
         </div>
           {
             /* Questions flying to shelves animation */
@@ -743,7 +1070,15 @@ const interval = setInterval(() => {
       <CardContent><ScrollArea className="h-[600px]"><div className="space-y-2">
         {topicHierarchy.map(node => (<TreeNode key={node.id} node={node} depth={0} />))}
       </div>
-      </ScrollArea></CardContent></Card>) : (<div className={cn(viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "space-y-4")}>
+      </ScrollArea></CardContent></Card>) : loading ? (
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      ) : questions.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">No questions found. Try importing some questions or adjusting your filters.</p>
+        </div>
+      ) : (<div className={cn(viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "space-y-4")}>
         {questions.map(question => (
           <QuestionCard 
             key={question.id} 
@@ -770,6 +1105,75 @@ const interval = setInterval(() => {
   </Card>
   </motion.div>)}
   </AnimatePresenceWrapper>
+    
+    {/* Question Creation Dialog */}
+    <Dialog open={showQuestionDialog} onOpenChange={setShowQuestionDialog}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Create New Question</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label>Question Text</Label>
+            <Textarea placeholder="Enter your question here..." className="min-h-[100px]" />
+          </div>
+          <div>
+            <Label>Question Type</Label>
+            <Select defaultValue="mcq">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="mcq">Multiple Choice</SelectItem>
+                <SelectItem value="true-false">True/False</SelectItem>
+                <SelectItem value="short-answer">Short Answer</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Subject</Label>
+            <Select>
+              <SelectTrigger>
+                <SelectValue placeholder="Select subject" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="math">Mathematics</SelectItem>
+                <SelectItem value="physics">Physics</SelectItem>
+                <SelectItem value="chemistry">Chemistry</SelectItem>
+                <SelectItem value="biology">Biology</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Difficulty</Label>
+            <Select defaultValue="medium">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="easy">Easy</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="hard">Hard</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowQuestionDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => {
+              toast({
+                title: "Question Created",
+                description: "Your question has been added to the question bank."
+              });
+              setShowQuestionDialog(false);
+            }}>
+              Create Question
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
     </div>
   );
 };

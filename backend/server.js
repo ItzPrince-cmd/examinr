@@ -34,6 +34,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const examRoutes = require('./routes/examRoutes');
 const questionRoutes = require('./routes/questionRoutes');
+const importRoutes = require('./routes/importRoutes');
 const resultRoutes = require('./routes/resultRoutes');
 const courseRoutes = require('./routes/courseRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
@@ -46,7 +47,13 @@ const {
   notFoundHandler, 
   errorLogger 
 } = require('./middleware/errorHandler');
-const connectDB = require('./config/database');
+const { connectDB } = require('./config/database');
+
+// Service imports
+const cacheService = require('./services/cacheService');
+// const storageService = require('./services/storageService');
+// const backupService = require('./services/backupService');
+// const monitoringService = require('./services/monitoringService');
 
 // Swagger
 const swaggerUi = require('swagger-ui-express');
@@ -66,6 +73,41 @@ const io = new Server(httpServer, {
 
 // Connect to MongoDB
 connectDB();
+
+// Initialize Redis cache (optional - won't break if Redis is not available)
+cacheService.connect().then((connected) => {
+  if (connected) {
+    app.locals.redis = cacheService;
+    console.log('Redis cache initialized');
+  } else {
+    console.log('Running without Redis cache');
+  }
+});
+
+// Initialize storage service
+// storageService.initialize().then(() => {
+//   app.locals.storage = storageService;
+//   console.log('Storage service initialized');
+// }).catch(err => {
+//   console.error('Failed to initialize storage service:', err);
+// });
+
+// Initialize backup service
+if (process.env.BACKUP_ENABLED === 'true') {
+  // backupService.initialize().then(() => {
+  //   console.log('Backup service initialized');
+  // }).catch(err => {
+  //   console.error('Failed to initialize backup service:', err);
+  // });
+}
+
+// Initialize monitoring service
+// monitoringService.initialize().then(() => {
+//   app.locals.monitoring = monitoringService;
+//   console.log('Monitoring service initialized');
+// }).catch(err => {
+//   console.error('Failed to initialize monitoring service:', err);
+// });
 
 // Trust proxy (for production behind reverse proxy)
 if (process.env.NODE_ENV === 'production') {
@@ -158,6 +200,7 @@ app.use('/api/auth', rateLimiters.auth, authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/questions', questionRoutes);
+app.use('/api/questions/import', importRoutes);
 app.use('/api/results', resultRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/categories', categoryRoutes);
@@ -201,6 +244,13 @@ app.use((req, res, next) => {
 // Socket.io for real-time features
 io.on('connection', (socket) => {
   logger.info('Socket.io client connected', { socketId: socket.id });
+
+  // User authentication for socket
+  socket.on('authenticate', (userId) => {
+    socket.join(userId); // Join user's personal room for notifications
+    socket.userId = userId;
+    logger.info('Socket authenticated', { socketId: socket.id, userId });
+  });
 
   // Exam room events
   socket.on('join-exam', (examId) => {
@@ -353,6 +403,10 @@ app.use((req, res, next) => {
   next();
 });
 
+// Set up import progress handlers
+const { setupImportSocketHandlers } = require('./controllers/importController');
+setupImportSocketHandlers(io);
+
 // Serve static files from React build
 if (process.env.NODE_ENV === 'production' || process.env.SERVE_FRONTEND === 'true') {
   const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
@@ -403,12 +457,53 @@ httpServer.listen(PORT, () => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  securityMonitor.stop();
-  await mongoose.connection.close();
-  httpServer.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
+const gracefulShutdown = async (signal) => {
+  logger.info(`${signal} received, shutting down gracefully`);
+  
+  // Stop accepting new connections
+  httpServer.close(async () => {
+    logger.info('HTTP server closed');
+    
+    try {
+      // Stop monitoring
+      // if (monitoringService) {
+      //   monitoringService.stop();
+      //   logger.info('Monitoring service stopped');
+      // }
+      
+      // Stop backup jobs
+      // if (backupService) {
+      //   backupService.stopAllJobs();
+      //   logger.info('Backup jobs stopped');
+      // }
+      
+      // Close cache connections
+      if (cacheService) {
+        await cacheService.close();
+        logger.info('Cache service closed');
+      }
+      
+      // Stop security monitoring
+      securityMonitor.stop();
+      logger.info('Security monitor stopped');
+      
+      // Close database connection
+      await mongoose.connection.close();
+      logger.info('Database connection closed');
+      
+      process.exit(0);
+    } catch (error) {
+      logger.error('Error during shutdown:', error);
+      process.exit(1);
+    }
   });
-});
+  
+  // Force shutdown after 30 seconds
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 30000);
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

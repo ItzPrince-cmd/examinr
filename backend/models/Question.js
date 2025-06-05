@@ -11,20 +11,57 @@ const questionSchema = new mongoose.Schema({
   text: {
     type: String,
     required: [true, 'Question text is required'],
-    maxlength: [5000, 'Question text cannot exceed 5000 characters']
+    maxlength: [10000, 'Question text cannot exceed 10000 characters']
+  },
+  // Enhanced LaTeX Support
+  latex: {
+    original: String, // Original LaTeX code
+    rendered: {
+      html: String,     // KaTeX rendered HTML
+      svg: String,      // SVG representation
+      mathml: String    // MathML for accessibility
+    },
+    containsLatex: {
+      type: Boolean,
+      default: false
+    },
+    expressions: [{
+      type: {
+        type: String,
+        enum: ['inline', 'display', 'environment']
+      },
+      expression: String,
+      startIndex: Number,
+      endIndex: Number
+    }],
+    metadata: {
+      expressionCount: Number,
+      hasDisplay: Boolean,
+      hasInline: Boolean,
+      hasEnvironments: Boolean,
+      isValid: Boolean,
+      validationErrors: [String],
+      hash: String  // For caching
+    },
+    searchIndex: String  // Extracted LaTeX for searching
   },
   type: {
     type: String,
     required: [true, 'Question type is required'],
-    enum: ['multiple_choice', 'true_false', 'essay', 'short_answer', 'fill_blank', 'matching', 'ordering', 'code'],
+    enum: ['multiple_choice', 'multiple_correct', 'true_false', 'essay', 'short_answer', 'fill_blank', 'matching', 'matrix_match', 'ordering', 'code', 'numerical'],
     index: true
   },
   
-  // Category and Classification
+  // Enhanced Category and Classification
   subject: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'Category',
+    type: String,
     required: [true, 'Subject is required'],
+    enum: ['physics', 'chemistry', 'mathematics', 'biology'],
+    index: true
+  },
+  chapter: {
+    type: String,
+    required: [true, 'Chapter is required'],
     index: true
   },
   topic: {
@@ -32,18 +69,36 @@ const questionSchema = new mongoose.Schema({
     required: [true, 'Topic is required'],
     index: true
   },
-  subtopic: String,
+  subtopic: {
+    type: String,
+    index: true
+  },
   tags: [{
     type: String,
     lowercase: true,
     trim: true
   }],
+  // Special categories
+  specialCategories: {
+    isPYQ: {
+      type: Boolean,
+      default: false
+    },
+    pyqYear: String,
+    pyqExam: String,
+    bookReference: {
+      name: String,
+      author: String,
+      edition: String,
+      pageNumber: String
+    }
+  },
   
-  // Difficulty and Scoring
+  // Enhanced Difficulty and Scoring
   difficulty: {
     type: String,
     required: [true, 'Difficulty level is required'],
-    enum: ['beginner', 'easy', 'medium', 'hard', 'expert'],
+    enum: ['easy', 'medium', 'hard', 'expert'],
     index: true
   },
   points: {
@@ -70,7 +125,7 @@ const questionSchema = new mongoose.Schema({
   },
   
   // Question Content Based on Type
-  // Multiple Choice & True/False
+  // Multiple Choice & True/False & Multiple Correct
   options: [{
     id: {
       type: String,
@@ -79,13 +134,23 @@ const questionSchema = new mongoose.Schema({
     text: {
       type: String,
       required: true,
-      maxlength: [1000, 'Option text cannot exceed 1000 characters']
+      maxlength: [2000, 'Option text cannot exceed 2000 characters']
+    },
+    latex: {
+      original: String,
+      rendered: String
     },
     isCorrect: {
       type: Boolean,
       default: false
     },
-    explanation: String,
+    explanation: {
+      text: String,
+      latex: {
+        original: String,
+        rendered: String
+      }
+    },
     media: {
       type: {
         type: String,
@@ -122,11 +187,15 @@ const questionSchema = new mongoose.Schema({
     }
   }],
   
-  // Matching
+  // Matching & Matrix Match
   matchingPairs: [{
     left: {
       id: String,
       text: String,
+      latex: {
+        original: String,
+        rendered: String
+      },
       media: {
         type: String,
         url: String
@@ -135,12 +204,40 @@ const questionSchema = new mongoose.Schema({
     right: {
       id: String,
       text: String,
+      latex: {
+        original: String,
+        rendered: String
+      },
       media: {
         type: String,
         url: String
       }
     }
   }],
+  
+  // Matrix Match specific
+  matrixMatch: {
+    rows: [{
+      id: String,
+      text: String,
+      latex: {
+        original: String,
+        rendered: String
+      }
+    }],
+    columns: [{
+      id: String,
+      text: String,
+      latex: {
+        original: String,
+        rendered: String
+      }
+    }],
+    correctMatches: [{
+      rowId: String,
+      columnId: String
+    }]
+  },
   
   // Ordering
   orderingItems: [{
@@ -174,13 +271,41 @@ const questionSchema = new mongoose.Schema({
     memoryLimit: Number // in MB
   },
   
-  // Explanation and Learning
+  // Numerical type specific
+  numerical: {
+    correctAnswer: Number,
+    tolerance: {
+      type: Number,
+      default: 0
+    },
+    unit: String,
+    significantFigures: Number
+  },
+  
+  // Enhanced Explanation and Learning
   explanation: {
     text: String,
+    latex: {
+      original: String,
+      rendered: String
+    },
+    steps: [{
+      order: Number,
+      text: String,
+      latex: {
+        original: String,
+        rendered: String
+      },
+      media: {
+        type: String,
+        url: String,
+        caption: String
+      }
+    }],
     media: [{
       type: {
         type: String,
-        enum: ['image', 'video', 'audio', 'document']
+        enum: ['image', 'video', 'audio', 'document', 'diagram']
       },
       url: String,
       title: String,
@@ -192,6 +317,26 @@ const questionSchema = new mongoose.Schema({
       description: String
     }]
   },
+  
+  // Enhanced Solution
+  solution: {
+    detailed: {
+      text: String,
+      latex: {
+        original: String,
+        rendered: String
+      }
+    },
+    brief: String,
+    steps: [{
+      order: Number,
+      text: String,
+      latex: {
+        original: String,
+        rendered: String
+      }
+    }]
+  },
   hint: {
     text: String,
     penaltyPoints: {
@@ -200,7 +345,7 @@ const questionSchema = new mongoose.Schema({
     }
   },
   
-  // Media Attachments
+  // Media Attachments with Enhanced Support
   media: [{
     type: {
       type: String,
@@ -217,7 +362,26 @@ const questionSchema = new mongoose.Schema({
     transcript: String, // For audio/video accessibility
     duration: Number, // For audio/video in seconds
     fileSize: Number, // In bytes
-    mimeType: String
+    mimeType: String,
+    position: {
+      type: String,
+      enum: ['question', 'option', 'solution', 'explanation'],
+      default: 'question'
+    }
+  }],
+  
+  // Image URLs for diagrams
+  imageUrls: [{
+    url: {
+      type: String,
+      required: true
+    },
+    caption: String,
+    position: {
+      type: String,
+      enum: ['question', 'solution', 'option_a', 'option_b', 'option_c', 'option_d'],
+      default: 'question'
+    }
   }],
   
   // Usage Statistics
@@ -260,7 +424,7 @@ const questionSchema = new mongoose.Schema({
     lastUsed: Date
   },
   
-  // Performance Analytics
+  // Enhanced Performance Analytics
   performanceData: {
     byDifficulty: [{
       userLevel: {
@@ -276,7 +440,48 @@ const questionSchema = new mongoose.Schema({
       percentage: Number
     }],
     discriminationIndex: Number, // How well question distinguishes between high and low performers
-    pointBiserialCorrelation: Number // Correlation between question score and total test score
+    pointBiserialCorrelation: Number, // Correlation between question score and total test score
+    attemptsByExam: [{
+      examType: {
+        type: String,
+        enum: ['jee', 'neet', 'board']
+      },
+      attempts: Number,
+      successRate: Number
+    }],
+    conceptualErrors: [{
+      concept: String,
+      frequency: Number
+    }]
+  },
+  
+  // Analytics tracking
+  analytics: {
+    totalAttempts: {
+      type: Number,
+      default: 0
+    },
+    correctAttempts: {
+      type: Number,
+      default: 0
+    },
+    incorrectAttempts: {
+      type: Number,
+      default: 0
+    },
+    skipCount: {
+      type: Number,
+      default: 0
+    },
+    averageTimeToSolve: {
+      type: Number,
+      default: 0
+    },
+    successRate: {
+      type: Number,
+      default: 0
+    },
+    lastAttemptDate: Date
   },
   
   // Metadata
@@ -387,15 +592,23 @@ const questionSchema = new mongoose.Schema({
 });
 
 // Indexes for performance
-questionSchema.index({ subject: 1, topic: 1 });
+questionSchema.index({ subject: 1, chapter: 1, topic: 1 });
+questionSchema.index({ subject: 1, topic: 1, subtopic: 1 });
 questionSchema.index({ difficulty: 1, type: 1 });
 questionSchema.index({ tags: 1 });
 questionSchema.index({ status: 1 });
 questionSchema.index({ createdBy: 1 });
 questionSchema.index({ 'statistics.timesUsed': -1 });
 questionSchema.index({ 'statistics.averageScore': 1 });
+questionSchema.index({ 'analytics.successRate': -1 });
+questionSchema.index({ 'specialCategories.isPYQ': 1 });
+questionSchema.index({ 'specialCategories.pyqYear': 1 });
 questionSchema.index({ createdAt: -1 });
-questionSchema.index({ text: 'text', title: 'text', tags: 'text' }); // Text search
+questionSchema.index({ text: 'text', title: 'text', tags: 'text', 'solution.detailed.text': 'text', 'latex.searchIndex': 'text' }); // Text search including LaTeX
+
+// Compound indexes for common queries
+questionSchema.index({ subject: 1, difficulty: 1, type: 1 });
+questionSchema.index({ subject: 1, chapter: 1, 'analytics.successRate': -1 });
 
 // Virtual for success rate
 questionSchema.virtual('successRate').get(function() {
@@ -412,8 +625,104 @@ questionSchema.virtual('calculatedDifficulty').get(function() {
   return 'expert';
 });
 
+// Method to detect LaTeX in text
+questionSchema.methods.detectAndProcessLatex = function(text) {
+  if (!text) return { containsLatex: false, original: text, rendered: text };
+  
+  // Common LaTeX delimiters
+  const latexPatterns = [
+    /\$\$[\s\S]+?\$\$/g,  // Display math $$...$$
+    /\$[^\$]+?\$/g,       // Inline math $...$
+    /\\\[[\s\S]+?\\\]/g,  // Display math \[...\]
+    /\\\([\s\S]+?\\\)/g,  // Inline math \(...\)
+    /\\begin\{[\s\S]+?\\end\{/g  // Environment blocks
+  ];
+  
+  let containsLatex = false;
+  for (const pattern of latexPatterns) {
+    if (pattern.test(text)) {
+      containsLatex = true;
+      break;
+    }
+  }
+  
+  return {
+    containsLatex,
+    original: text,
+    rendered: text // This will be rendered on frontend with MathJax/KaTeX
+  };
+};
+
 // Pre-save middleware
-questionSchema.pre('save', function(next) {
+questionSchema.pre('save', async function(next) {
+  const LatexService = require('../services/latexService');
+  
+  // Process LaTeX in question text
+  if (this.isModified('text')) {
+    const latexData = LatexService.prepareLaTeXForStorage(this.text);
+    this.latex = {
+      ...latexData.metadata,
+      original: this.text,
+      searchIndex: latexData.searchIndex,
+      expressions: LatexService.extractLatexExpressions(this.text)
+    };
+    
+    // Validate LaTeX
+    const validation = LatexService.validateLatex(this.text);
+    if (!validation.isValid) {
+      this.latex.metadata = {
+        ...this.latex.metadata,
+        isValid: false,
+        validationErrors: validation.errors
+      };
+    }
+  }
+  
+  // Process LaTeX in options
+  if (this.isModified('options') && this.options) {
+    for (const option of this.options) {
+      if (option.text) {
+        const optionLatexData = LatexService.prepareLaTeXForStorage(option.text);
+        option.latex = {
+          original: option.text,
+          ...optionLatexData.metadata
+        };
+      }
+      if (option.explanation && option.explanation.text) {
+        const explLatexData = LatexService.prepareLaTeXForStorage(option.explanation.text);
+        option.explanation.latex = {
+          original: option.explanation.text,
+          ...explLatexData.metadata
+        };
+      }
+    }
+  }
+  
+  // Process LaTeX in solution
+  if (this.solution && this.solution.detailed && this.isModified('solution.detailed.text')) {
+    const solutionLatexData = LatexService.prepareLaTeXForStorage(this.solution.detailed.text);
+    this.solution.detailed.latex = {
+      original: this.solution.detailed.text,
+      ...solutionLatexData.metadata
+    };
+  }
+  
+  // Process LaTeX in explanation
+  if (this.explanation && this.isModified('explanation.text')) {
+    const explLatexData = LatexService.prepareLaTeXForStorage(this.explanation.text);
+    this.explanation.latex = {
+      original: this.explanation.text,
+      ...explLatexData.metadata
+    };
+  }
+  
+  // Update analytics
+  if (this.isModified('statistics')) {
+    if (this.statistics.timesAnswered > 0) {
+      this.analytics.successRate = (this.statistics.timesCorrect / this.statistics.timesAnswered) * 100;
+    }
+  }
+  
   // Auto-generate slug from title
   if (!this.slug && this.title) {
     this.slug = this.title
@@ -530,6 +839,118 @@ questionSchema.statics.findSimilar = async function(questionId, limit = 5) {
   })
   .limit(limit)
   .sort('-qualityScore -statistics.averageScore');
+};
+
+// Static method to detect duplicates
+questionSchema.statics.findDuplicates = async function(questionText, subject, chapter, topic) {
+  const LatexService = require('../services/latexService');
+  
+  // Use LaTeX service to clean text for comparison
+  const cleanText = LatexService.cleanTextForComparison(questionText);
+  
+  // Find questions with similar text
+  const potentialDuplicates = await this.find({
+    subject: subject,
+    chapter: chapter,
+    topic: topic,
+    $text: { $search: cleanText }
+  })
+  .select('text title subject chapter topic difficulty type')
+  .limit(10);
+  
+  // Calculate similarity score
+  const duplicates = potentialDuplicates.map(q => {
+    const qCleanText = LatexService.cleanTextForComparison(q.text);
+    
+    // Simple similarity calculation (can be enhanced)
+    const similarity = this.calculateSimilarity(cleanText, qCleanText);
+    
+    return {
+      question: q,
+      similarity: similarity
+    };
+  })
+  .filter(d => d.similarity > 0.8) // 80% similarity threshold
+  .sort((a, b) => b.similarity - a.similarity);
+  
+  return duplicates;
+};
+
+// Helper method to calculate text similarity
+questionSchema.statics.calculateSimilarity = function(text1, text2) {
+  const words1 = text1.split(/\s+/);
+  const words2 = text2.split(/\s+/);
+  
+  const set1 = new Set(words1);
+  const set2 = new Set(words2);
+  
+  const intersection = new Set([...set1].filter(x => set2.has(x)));
+  const union = new Set([...set1, ...set2]);
+  
+  return intersection.size / union.size;
+};
+
+// Static method to search for questions by LaTeX expression
+questionSchema.statics.findByLatexExpression = async function(latexExpression, options = {}) {
+  const LatexService = require('../services/latexService');
+  
+  const {
+    subject,
+    limit = 10,
+    exactMatch = false
+  } = options;
+  
+  // Build search query
+  const query = {
+    'latex.containsLatex': true
+  };
+  
+  if (subject) {
+    query.subject = subject;
+  }
+  
+  // Find questions containing LaTeX
+  const questions = await this.find(query)
+    .select('text title subject chapter topic latex.expressions')
+    .limit(limit * 10); // Get more to filter
+  
+  // Search within LaTeX expressions
+  const results = [];
+  for (const question of questions) {
+    if (question.latex && question.latex.expressions) {
+      const matches = LatexService.searchLatexInText(question.text, latexExpression);
+      if (matches.length > 0) {
+        const maxScore = Math.max(...matches.map(m => m.matchScore));
+        if (!exactMatch || maxScore === 1.0) {
+          results.push({
+            question,
+            matches,
+            score: maxScore
+          });
+        }
+      }
+    }
+  }
+  
+  // Sort by score and limit
+  return results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+};
+
+// Method to get LaTeX templates for this question's subject
+questionSchema.methods.getRelevantLatexTemplates = function() {
+  const LatexService = require('../services/latexService');
+  
+  const subjectMap = {
+    'physics': 'physics',
+    'chemistry': 'chemistry',
+    'mathematics': 'mathematics',
+    'biology': 'biology'
+  };
+  
+  const mappedSubject = subjectMap[this.subject] || 'mathematics';
+  return LatexService.getLatexTemplate(mappedSubject);
 };
 
 module.exports = mongoose.model('Question', questionSchema);
